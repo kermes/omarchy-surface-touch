@@ -51,11 +51,33 @@ load, but the touch-specific work is entirely in `VirtualKeyboard.qml` /
 ./install.sh
 ```
 
-Needs `libpam_pwdfile` (`yay -S libpam_pwdfile`) and `openssl`. Prompts for
-a PIN (4+ digits), hashes it (`openssl passwd -6`, SHA-512 crypt), and
-writes `/etc/omarchy-lock-pin.pwd` as `username:hash`, mode 600. Then
+Needs `libpam_pwdfile` (`yay -S libpam_pwdfile`), `openssl` and `setfacl`
+(`pacman -S acl`). Prompts for a PIN (6+ digits), hashes it with
+`openssl passwd -6` at 200,000 rounds, and writes
+`/etc/omarchy-lock-pin.pwd` as `username:hash`, mode 600 owned by
+`root:root` with a POSIX ACL granting read to your user alone. Then
 installs the PAM config and copies the plugin to
 `~/.config/omarchy/plugins/touchlock/`.
+
+### Choose a PIN you do not use anywhere else
+
+Quickshell runs the lock screen's PAM conversation **as your user**, so
+`pam_pwdfile` has to be able to read the hash unprivileged. That is what the
+ACL grants, and it means any process running as you can read the hash and
+attack it offline. Nothing about this design avoids that.
+
+Rounds are set to 200,000 rather than `openssl`'s 5000-round default to make
+that attack expensive, but a short numeric PIN is still a small search space:
+
+| rounds | per guess | 4-digit | 6-digit |
+|---|---|---|---|
+| 5000 (openssl default) | 5.7 ms | 27 s | 95 min |
+| 200,000 (used here) | 181 ms | 30 min | 50 h |
+
+Measured on one CPU core; a GPU is orders of magnitude faster. Hence the
+6-digit minimum. **Do not reuse a PIN you use for anything else** — it
+protects a lock screen, not your account, and it is not stored with the same
+protections as your account password.
 
 You still need to **enable the plugin** through however your Omarchy version
 surfaces plugin management (Setup > Plugins, or directly editing
