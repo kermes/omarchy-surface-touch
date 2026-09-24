@@ -3,12 +3,47 @@
 # touchscreen to match. Paused while /tmp/rotation-locked exists (toggled by
 # omarchy-toggle-rotation-lock).
 LOCK_FILE="/tmp/rotation-locked"
-MONITOR="eDP-1"
-MODE="2736x1824@59.96"
-POS="0x0"
-SCALE="1.6"
 DELAY="${ROTATE_DELAY:-0.5}"
+
+# Panel geometry. These used to be hardcoded to one machine's values, which
+# failed silently on every other model -- rotation would apply a mode the panel
+# does not have. Read them from Hyprland instead, and let any of the four be
+# overridden if the detection picks the wrong output.
+MONITOR="${ROTATE_MONITOR:-}"
+MODE="${ROTATE_MODE:-}"
+POS="${ROTATE_POS:-}"
+SCALE="${ROTATE_SCALE:-}"
 pending_pid=""
+
+detect_panel() {
+    local json sel
+    json=$(hyprctl monitors -j 2>/dev/null) || return 1
+    [ -n "$json" ] || return 1
+    # Prefer the internal panel; fall back to whatever is listed first. The
+    # refresh rate is rounded to 2dp to match the form Hyprland accepts in a
+    # mode string (it reports e.g. 59.959 but wants 59.96).
+    sel=$(printf '%s' "$json" | jq -r '
+        ((map(select(.name | startswith("eDP"))) | first) // .[0])
+        | select(. != null)
+        | "\(.name)\t\(.width)x\(.height)@\((.refreshRate*100|round)/100)\t\(.x)x\(.y)\t\(.scale)"
+    ' 2>/dev/null) || return 1
+    [ -n "$sel" ] || return 1
+    local d_monitor d_mode d_pos d_scale
+    IFS=$'\t' read -r d_monitor d_mode d_pos d_scale <<<"$sel"
+    [ -n "$d_monitor" ] || return 1
+    MONITOR="${MONITOR:-$d_monitor}"
+    MODE="${MODE:-$d_mode}"
+    POS="${POS:-$d_pos}"
+    SCALE="${SCALE:-$d_scale}"
+}
+
+if ! detect_panel; then
+    echo "ERROR: could not read panel geometry from 'hyprctl monitors -j'." >&2
+    echo "  Is Hyprland running, and is jq installed?" >&2
+    echo "  Set ROTATE_MONITOR / ROTATE_MODE / ROTATE_POS / ROTATE_SCALE to skip detection." >&2
+    exit 1
+fi
+echo "panel: monitor=$MONITOR mode=$MODE pos=$POS scale=$SCALE"
 
 apply_orientation() {
     local orientation="$1"
