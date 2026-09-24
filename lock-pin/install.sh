@@ -12,6 +12,15 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 source ../lib.sh
 
+# Must run as the user who will unlock the screen, not under sudo: $USER, $HOME
+# and the PIN file's username field are all taken from the invoking user, and
+# under `sudo ./install.sh` they all become root's. The PIN file would then name
+# the wrong user, pam_pwdfile would never match it, and auth would silently fall
+# through to pam_unix -- the PIN would just appear to be rejected.
+if [[ $EUID -eq 0 ]]; then
+  die "Run this as your normal user, not with sudo -- it calls sudo itself where needed."
+fi
+
 require_cmd openssl
 require_cmd pacman
 
