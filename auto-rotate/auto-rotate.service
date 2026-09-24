@@ -1,5 +1,18 @@
 [Unit]
 Description=Auto-rotate display + touchscreen to match device orientation
+# Without ordering, this starts at login before uwsm has exported
+# HYPRLAND_INSTANCE_SIGNATURE into the user manager, so every hyprctl call fails
+# with "HYPRLAND_INSTANCE_SIGNATURE not set!". Restart=always then keeps the unit
+# active in that broken state, which reads as unsupported hardware rather than a
+# unit-ordering problem.
+#
+# After= is ordering only -- it does not stop anything from starting this unit.
+# ConditionEnvironment is what keeps it out of sessions with no compositor (e.g.
+# over SSH), where it would otherwise hold the unit name and stop the real one
+# starting at graphical login, since Wants= will not restart what already runs.
+After=graphical-session.target
+PartOf=graphical-session.target
+ConditionEnvironment=HYPRLAND_INSTANCE_SIGNATURE
 
 [Service]
 Type=simple
@@ -8,4 +21,4 @@ Restart=always
 RestartSec=1
 
 [Install]
-WantedBy=default.target
+WantedBy=graphical-session.target

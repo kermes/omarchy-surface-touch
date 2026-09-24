@@ -4,26 +4,26 @@ Follows the device's accelerometer and rotates the display + touchscreen
 input to match, with debouncing so picking the tablet up and setting it back
 down doesn't flash-rotate through every orientation in between.
 
-## Prerequisite: find your values
+## Panel geometry
 
-`auto-rotate.sh` hardcodes three things at the top of the file that are
-specific to the exact machine it was written on (a Surface Pro 7+):
+The output name, mode, position and scale are read from
+`hyprctl monitors -j` when the service starts, preferring the internal panel
+(`eDP-*`). Nothing to configure on a single-display machine.
 
-```bash
-MONITOR="eDP-1"
-MODE="2736x1824@59.96"
-SCALE="1.6"
-```
-
-Before installing, find yours:
+If the detection picks the wrong output -- an external monitor listed first,
+say -- override any of the four:
 
 ```
-hyprctl monitors        # monitor name, current mode, current scale
+systemctl --user edit auto-rotate.service
+# [Service]
+# Environment=ROTATE_MONITOR=eDP-1
+# Environment=ROTATE_MODE=2736x1824@59.96
+# Environment=ROTATE_POS=0x0
+# Environment=ROTATE_SCALE=1.6
 ```
 
-Edit those three lines in `auto-rotate.sh` to match (do this before running
-`./install.sh`, or after -- it edits `~/.local/bin/auto-rotate.sh` in place
-either way).
+Check what was detected with `journalctl --user -u auto-rotate -n 5`; it logs
+a `panel: ...` line at startup. `hyprctl monitors` shows the same values.
 
 ## How it works
 

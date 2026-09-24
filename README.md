@@ -23,7 +23,7 @@ that from scratch.
 | [`trackpad/`](trackpad/) | Floating virtual trackpad panel (Quickshell) + root uinput injector | yes (injector service) |
 | [`two-finger-right-click/`](two-finger-right-click/) | Two-finger tap on the touchscreen = right click | yes |
 | [`auto-rotate/`](auto-rotate/) | Accelerometer-driven display + touch rotation | no |
-| [`screensaver/`](screensaver/) | Hides OSK/trackpad and adds touch-dismiss to the screensaver | no |
+| [`screensaver/`](screensaver/) | Hides OSK/trackpad and adds touch-dismiss to the screensaver | yes (see note) |
 | [`lock-pin/`](lock-pin/) | Short PIN unlock (separate from your password) + on-screen keypad on the lock screen | yes (PAM/PIN file) |
 | [`touchpad-mt-fix/`](touchpad-mt-fix/) | Fixes the Type Cover trackpad silently losing two-finger scroll after suspend/resume | yes (systemd-sleep hook) |
 
@@ -38,14 +38,16 @@ Written and tested on a **Surface Pro 7+** (the commercial/LTE SKU sold
 through channels like Costco -- same chassis and panel as the regular
 Surface Pro 7, different internals) running Omarchy 4.x (Arch + Hyprland)
 with the linux-surface kernel. Nothing here is 7+-specific; a plain Surface
-Pro 7 should need the exact same setup. Device-specific values you'll need
-to adjust for other hardware are called out in each component's README --
-in short:
+Pro 7 should need the exact same setup.
 
-- `TOUCH_DEVICE_NAME` (two-finger-right-click, screensaver) -- your IPTS
-  digitizer's evdev device name
-- `MONITOR` / `MODE` / `SCALE` (auto-rotate) -- your panel's output name,
-  mode, and scale
+Most device-specific values are now detected at runtime rather than
+hardcoded: `auto-rotate` reads the panel's output/mode/position/scale from
+`hyprctl monitors -j`, the touchscreen is located by capability
+(`ABS_MT_SLOT`) rather than by device name, and the Type Cover sleep hook
+matches the Microsoft vendor id rather than one model's product id. Each is
+still overridable -- see the component READMEs. What remains genuinely
+model-dependent:
+
 - OSK height/layout flags (osk) -- comfortable key size depends on your
   screen's DPI
 
@@ -53,6 +55,53 @@ Everything else (the trackpad panel, the wvkbd patch, the lock screen
 plugin, the PAM setup) should work unmodified on any Surface Pro/Go/Book
 model, or any other Linux tablet with a working IPTS-style touchscreen and
 an accelerometer.
+
+### Models with an ELAN digitizer (e.g. Surface Go)
+
+[`kernel/`](kernel/) is IPTS-specific. Surface models with an ELAN I2C
+digitizer instead do not need it: the touchscreen works on a stock kernel
+through mainline `hid-multitouch`, with no linux-surface and no iptsd, and
+`iptsd@.service` does not exist for the restart override to attach to. Worth
+knowing before committing to a linux-surface install, which is a much bigger
+change than the rest of this repo. Skip `kernel/` on those models and start
+at [Quick start](#quick-start).
+
+*(Reported on a Surface Go; not verified here. See
+[#5](https://github.com/javon27/omarchy-surface-touch/issues/5).)*
+
+## Surface Pen
+
+The pen needs nothing from this repo. iptsd exposes it as a normal tablet
+tool and Hyprland picks it up -- pressure and tilt included -- once
+[`kernel/`](kernel/) is done.
+
+Two things are worth setting anyway:
+
+**Palm rejection.** iptsd can ignore touch while the pen is in range, which
+is what you want when resting a hand on the glass to write. In
+`/etc/iptsd.conf`:
+
+```ini
+[Touchscreen]
+DisableOnStylus = true
+```
+
+Then `sudo systemctl restart 'iptsd@*'`. (`DisableOnPalm = true` is a
+separate, blunter option that keys off contact shape instead.) Do not build
+this in userspace by watching `libinput debug-events` for proximity: that
+needs a passwordless sudo rule for `libinput`, which would let anything
+running as you read every input device on the machine, keyboard included.
+
+**Duplicate devices.** The raw uncalibrated HID nodes show up alongside the
+iptsd-processed ones. Disable the raw pair so only the processed devices
+reach Hyprland, in `~/.config/hypr/input.lua`:
+
+```lua
+hl.device({ name = "intel-touch-host-controller", enabled = false })
+hl.device({ name = "intel-touch-host-controller-stylus", enabled = false })
+```
+
+Names differ by model -- check `hyprctl devices`.
 
 ## Quick start
 
@@ -79,6 +128,12 @@ but is a real tradeoff (a bug in either script runs with root privileges).
 If you'd rather set up udev rules and run them as your own user, the scripts
 themselves need no changes -- only the systemd units would move from system
 to user scope.
+
+`screensaver` gets this backwards today: it reads the touchscreen the same
+way those two do, but installs as a *user* unit, so it cannot open
+`/dev/input/event*` and its touch-dismiss half has never worked. It needs
+moving to a system unit -- see
+[`screensaver/README.md`](screensaver/README.md).
 
 ## Contributing
 
