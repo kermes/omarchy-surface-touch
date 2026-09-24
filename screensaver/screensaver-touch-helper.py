@@ -10,6 +10,7 @@ window class org.omarchy.screensaver) is up:
    alone can't reach that, so this injects a keypress via the trackpad
    injector's virtual keyboard device instead.
 """
+import glob
 import os
 import socket
 import subprocess
@@ -19,7 +20,7 @@ import time
 import evdev
 from evdev import ecodes as e
 
-TOUCH_DEVICE_NAME = os.environ.get("TOUCH_DEVICE_NAME", "IPTSD Virtual Touchscreen 045E:0C1A")
+TOUCH_DEVICE_NAME = os.environ.get("TOUCH_DEVICE_NAME")  # optional override
 SOCKET_PATH = "/run/trackpad.sock"
 OSK_STATE_FILE = "/tmp/osk-visible"
 TRACKPAD_MARKER = "omarchy/trackpad/shell.qml"
@@ -58,20 +59,93 @@ def hide_osk_and_trackpad():
     )
 
 
-def find_touch_device():
+def _multitouch_devices():
+    """Every device exposing ABS_MT_SLOT, i.e. a real multitouch surface.
+
+    This is what separates the touchscreen from the stylus and from the raw
+    uncalibrated HID nodes, on every Surface model -- unlike a hardcoded device
+    name, which silently matched nothing on anything but a Pro 7+.
+    """
+    found = []
     for path in evdev.list_devices():
-        d = evdev.InputDevice(path)
-        if d.name == TOUCH_DEVICE_NAME:
-            return d
-    return None
+        try:
+            d = evdev.InputDevice(path)
+        except OSError:
+            continue
+        caps = d.capabilities().get(e.EV_ABS) or []
+        if any(code == e.ABS_MT_SLOT for code, _ in caps):
+            found.append(d)
+    return found
+
+
+def _all_device_names():
+    names = []
+    for path in evdev.list_devices():
+        try:
+            names.append(evdev.InputDevice(path).name)
+        except OSError:
+            continue
+    return names
+
+
+def find_touch_device():
+    if TOUCH_DEVICE_NAME:
+        for path in evdev.list_devices():
+            try:
+                d = evdev.InputDevice(path)
+            except OSError:
+                continue
+            if d.name == TOUCH_DEVICE_NAME:
+                return d
+        return None
+    candidates = _multitouch_devices()
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _report_no_device():
+    """Say what was expected, what was found, and -- crucially -- why.
+
+    The old code logged only "waiting for touch device ..." every 2s forever,
+    which is indistinguishable from the service working. There are two very
+    different causes and the message now separates them: a device name that
+    matches nothing (different Surface model), and no read access to
+    /dev/input at all (this unit runs as your user; the event nodes are
+    root:input, and logind hands the compositor its devices over D-Bus rather
+    than via file permissions, so a plain user process sees nothing).
+    """
+    visible = evdev.list_devices()
+    if not visible and glob.glob("/dev/input/event*"):
+        log("ERROR: cannot read any /dev/input/event* node.")
+        log("  This service runs as your user, but the event nodes are root:input.")
+        log("  It needs to run as a system unit (like trackpad-injector.service and")
+        log("  two-finger-rightclick.service do), or your user must be in the 'input' group.")
+        return
+
+    if TOUCH_DEVICE_NAME:
+        log(f"ERROR: no input device is named {TOUCH_DEVICE_NAME!r} (from TOUCH_DEVICE_NAME).")
+    else:
+        log("ERROR: could not identify the touchscreen automatically.")
+    cands = _multitouch_devices()
+    if len(cands) > 1:
+        log("  more than one multitouch device found -- set TOUCH_DEVICE_NAME to one of:")
+        for d in cands:
+            log(f"    {d.name!r}  ({d.path})")
+    elif not cands:
+        log("  no device exposes ABS_MT_SLOT. Is the touchscreen driver up (iptsd, hid-multitouch)?")
+    names = _all_device_names()
+    log("  input devices present: " + (", ".join(repr(n) for n in names) if names else "(none)"))
 
 
 def wait_for_touch_device():
+    reported = False
     while True:
         dev = find_touch_device()
         if dev is not None:
+            log(f"using touch device {dev.name!r} ({dev.path})")
             return dev
-        log(f"waiting for touch device '{TOUCH_DEVICE_NAME}'...")
+        if not reported:
+            _report_no_device()
+            reported = True
         time.sleep(2)
 
 
