@@ -22,6 +22,11 @@ from evdev import ecodes as e
 
 TOUCH_DEVICE_NAME = os.environ.get("TOUCH_DEVICE_NAME")  # optional override
 SOCKET_PATH = "/run/trackpad.sock"
+
+# This runs as root (see the unit), so nothing about the user's session is in
+# the environment and every process lookup would otherwise match all users.
+RUNTIME_DIR = os.environ.get("USER_XDG_RUNTIME_DIR", "/run/user/1000")
+TARGET_UID = os.environ.get("TARGET_UID")
 OSK_STATE_FILE = "/tmp/osk-visible"
 TRACKPAD_MARKER = "omarchy/trackpad/shell.qml"
 
@@ -30,8 +35,39 @@ def log(msg):
     print(msg, flush=True)
 
 
+def _uid_scope():
+    """Restrict pgrep/pkill to the session user, since root sees every process."""
+    return ["-u", TARGET_UID] if TARGET_UID else []
+
+
+def hyprctl_eval(lua):
+    """Run `hyprctl eval` against the user's compositor.
+
+    As root there is no HYPRLAND_INSTANCE_SIGNATURE in the environment, so find
+    the instance on disk and pass it in -- the same approach
+    two-finger-right-click.py uses. Returns False when no compositor is up yet,
+    which is normal at boot: this unit is ordered after multi-user.target, not
+    after the graphical session.
+    """
+    for sock_dir in glob.glob(f"{RUNTIME_DIR}/hypr/*"):
+        try:
+            r = subprocess.run(
+                ["hyprctl", "eval", lua],
+                env={**os.environ,
+                     "HYPRLAND_INSTANCE_SIGNATURE": os.path.basename(sock_dir),
+                     "XDG_RUNTIME_DIR": RUNTIME_DIR},
+                capture_output=True, text=True, timeout=2,
+            )
+            if r.returncode == 0:
+                return True
+        except Exception:
+            continue
+    return False
+
+
 def screensaver_active():
-    r = subprocess.run(["pgrep", "-f", "org.omarchy.screensaver"], capture_output=True)
+    r = subprocess.run(["pgrep", *_uid_scope(), "-f", "org.omarchy.screensaver"],
+                       capture_output=True)
     return r.returncode == 0
 
 
@@ -48,23 +84,23 @@ def send_injector(cmd):
 
 def hide_osk_and_trackpad():
     log("screensaver activated -- hiding OSK/trackpad")
-    subprocess.run(["pkill", "-SIGUSR1", "wvkbd-deskintl"])
+    subprocess.run(["pkill", "--signal", "USR1", *_uid_scope(), "wvkbd-deskintl"])
     try:
         os.remove(OSK_STATE_FILE)
     except FileNotFoundError:
         pass
-    subprocess.run(["pkill", "-f", TRACKPAD_MARKER])
-    subprocess.run(
-        ["bash", "-c", 'hyprctl eval "hl.config({ cursor = { hide_on_touch = true } })" >/dev/null 2>&1']
-    )
+    subprocess.run(["pkill", *_uid_scope(), "-f", TRACKPAD_MARKER])
+    hyprctl_eval("hl.config({ cursor = { hide_on_touch = true } })")
 
 
 def _multitouch_devices():
-    """Every device exposing ABS_MT_SLOT, i.e. a real multitouch surface.
+    """Direct-input multitouch devices, i.e. touchscreens.
 
-    This is what separates the touchscreen from the stylus and from the raw
-    uncalibrated HID nodes, on every Surface model -- unlike a hardcoded device
-    name, which silently matched nothing on anything but a Pro 7+.
+    ABS_MT_SLOT alone is not enough -- a precision touchpad reports it too, so
+    on a Surface with the Type Cover attached there are two matches and neither
+    is unambiguous. The kernel separates them with INPUT_PROP_DIRECT (the
+    surface you touch is the display) versus INPUT_PROP_POINTER (an indirect
+    pointing device), which is the same signal libinput keys off.
     """
     found = []
     for path in evdev.list_devices():
@@ -73,8 +109,14 @@ def _multitouch_devices():
         except OSError:
             continue
         caps = d.capabilities().get(e.EV_ABS) or []
-        if any(code == e.ABS_MT_SLOT for code, _ in caps):
-            found.append(d)
+        if not any(code == e.ABS_MT_SLOT for code, _ in caps):
+            continue
+        try:
+            if e.INPUT_PROP_DIRECT not in d.input_props():
+                continue
+        except Exception:
+            pass  # no property info from this driver; keep it as a candidate
+        found.append(d)
     return found
 
 
@@ -107,18 +149,21 @@ def _report_no_device():
 
     The old code logged only "waiting for touch device ..." every 2s forever,
     which is indistinguishable from the service working. There are two very
-    different causes and the message now separates them: a device name that
-    matches nothing (different Surface model), and no read access to
-    /dev/input at all (this unit runs as your user; the event nodes are
-    root:input, and logind hands the compositor its devices over D-Bus rather
-    than via file permissions, so a plain user process sees nothing).
+    different causes and the message separates them: a device name that matches
+    nothing (different Surface model), and no read access to /dev/input at all
+    (which should only happen now if this ends up running unprivileged).
     """
     visible = evdev.list_devices()
     if not visible and glob.glob("/dev/input/event*"):
         log("ERROR: cannot read any /dev/input/event* node.")
-        log("  This service runs as your user, but the event nodes are root:input.")
-        log("  It needs to run as a system unit (like trackpad-injector.service and")
-        log("  two-finger-rightclick.service do), or your user must be in the 'input' group.")
+        if os.geteuid() != 0:
+            log("  Not running as root. This must be installed as a system unit")
+            log("  (screensaver/install.sh does that) -- /dev/input/* is root:input,")
+            log("  and logind hands the compositor its devices over D-Bus rather than")
+            log("  through file permissions, so as your user nothing is visible here.")
+        else:
+            log("  Running as root but still seeing nothing, which is unexpected --")
+            log("  check that the touchscreen driver is up (iptsd, hid-multitouch).")
         return
 
     if TOUCH_DEVICE_NAME:
@@ -131,7 +176,7 @@ def _report_no_device():
         for d in cands:
             log(f"    {d.name!r}  ({d.path})")
     elif not cands:
-        log("  no device exposes ABS_MT_SLOT. Is the touchscreen driver up (iptsd, hid-multitouch)?")
+        log("  no direct-input multitouch device found. Is the touchscreen driver up (iptsd, hid-multitouch)?")
     names = _all_device_names()
     log("  input devices present: " + (", ".join(repr(n) for n in names) if names else "(none)"))
 

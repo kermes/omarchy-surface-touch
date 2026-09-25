@@ -16,10 +16,21 @@ if ! systemctl is-active --quiet trackpad-injector.service 2>/dev/null; then
 fi
 
 install_bin screensaver-touch-helper.py
-install_user_unit screensaver-touch-helper.service
 
-systemctl --user daemon-reload
-systemctl --user enable --now screensaver-touch-helper.service
+# Earlier versions installed this as a user unit, where it could never read the
+# touchscreen. Clear that out first, or the stale copy keeps running alongside
+# the system one and keeps logging the same failure.
+if [[ -e "$HOME/.config/systemd/user/screensaver-touch-helper.service" ]]; then
+  info "Removing the old user-scoped unit (it could not read /dev/input)."
+  systemctl --user disable --now screensaver-touch-helper.service >/dev/null 2>&1 || true
+  rm -f "$HOME/.config/systemd/user/screensaver-touch-helper.service"
+  systemctl --user daemon-reload || true
+fi
 
-info "screensaver-touch-helper.service is running."
-info "Override the touch device name with: systemctl --user edit screensaver-touch-helper.service"
+install_system_unit screensaver-touch-helper.service
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now screensaver-touch-helper.service
+
+info "screensaver-touch-helper.service is running (system unit, runs as root)."
+info "Override the touch device name with: sudo systemctl edit screensaver-touch-helper.service"
