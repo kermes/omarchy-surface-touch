@@ -19,7 +19,7 @@ import time
 import evdev
 from evdev import AbsInfo, ecodes as e, UInput
 
-DEVICE_NAME = os.environ.get("TOUCH_DEVICE_NAME", "IPTSD Virtual Touchscreen 045E:0C1A")
+DEVICE_NAME = os.environ.get("TOUCH_DEVICE_NAME")  # optional override
 TAP_MAX_DURATION = int(os.environ.get("TAP_MAX_DURATION_MS", "350")) / 1000.0
 SECOND_FINGER_WINDOW = int(os.environ.get("SECOND_FINGER_WINDOW_MS", "150")) / 1000.0
 MOVE_FUZZ_PERCENT = float(os.environ.get("MOVE_FUZZ_PERCENT", "3.0"))
@@ -58,23 +58,81 @@ def log(msg):
     print(msg, flush=True)
 
 
-def find_device():
+def _touchscreens():
+    """Direct-input multitouch devices, i.e. touchscreens.
+
+    ABS_MT_SLOT alone is not enough -- a precision touchpad reports it too, and
+    binding to the Type Cover's touchpad here would be worse than finding
+    nothing: every ordinary two-finger tap on the touchpad would fire a
+    synthetic right-click on top of the touchpad's own gesture. The kernel
+    separates the two with INPUT_PROP_DIRECT (you touch the display itself)
+    versus INPUT_PROP_POINTER, which is what libinput keys off as well.
+
+    Kept textually in step with screensaver-touch-helper.py's copy.
+    """
+    found = []
     for path in evdev.list_devices():
         try:
             dev = evdev.InputDevice(path)
         except OSError:
             continue
-        if dev.name == DEVICE_NAME:
-            return dev
-    return None
+        caps = dev.capabilities().get(e.EV_ABS) or []
+        if not any(code == e.ABS_MT_SLOT for code, _ in caps):
+            continue
+        try:
+            if e.INPUT_PROP_DIRECT not in dev.input_props():
+                continue
+        except Exception:
+            pass  # no property info from this driver; keep it as a candidate
+        found.append(dev)
+    return found
+
+
+def find_device():
+    if DEVICE_NAME:
+        for path in evdev.list_devices():
+            try:
+                dev = evdev.InputDevice(path)
+            except OSError:
+                continue
+            if dev.name == DEVICE_NAME:
+                return dev
+        return None
+    candidates = _touchscreens()
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _report_no_device():
+    """Name the cause instead of looping on one unchanging line.
+
+    The old message repeated a hardcoded device name every two seconds, which
+    on any model but a Pro 7+ was indistinguishable from working.
+    """
+    if not evdev.list_devices() and glob.glob("/dev/input/event*"):
+        log("ERROR: cannot read any /dev/input/event* node -- this must run as root.")
+        return
+    if DEVICE_NAME:
+        log(f"ERROR: no input device is named {DEVICE_NAME!r} (from TOUCH_DEVICE_NAME).")
+    else:
+        log("ERROR: could not identify the touchscreen automatically.")
+    cands = _touchscreens()
+    if len(cands) > 1:
+        log("  more than one touchscreen found -- set TOUCH_DEVICE_NAME to one of:")
+        for d in cands:
+            log(f"    {d.name!r}  ({d.path})")
+    elif not cands:
+        log("  no direct-input multitouch device found. Is the touchscreen driver up (iptsd, hid-multitouch)?")
 
 
 def wait_for_device():
+    reported = False
     while True:
         dev = find_device()
         if dev is not None:
             return dev
-        log(f"Waiting for touch device '{DEVICE_NAME}'...")
+        if not reported:
+            _report_no_device()
+            reported = True
         time.sleep(2)
 
 
