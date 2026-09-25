@@ -1,24 +1,26 @@
 [Unit]
 Description=Hide OSK/trackpad and enable touch-dismiss for the screensaver
-# Without ordering, this starts at login before uwsm has exported
-# HYPRLAND_INSTANCE_SIGNATURE into the user manager, so every hyprctl call fails
-# with "HYPRLAND_INSTANCE_SIGNATURE not set!". Restart=always then keeps the unit
-# active in that broken state, which reads as unsupported hardware rather than a
-# unit-ordering problem.
+# System-scoped, because this reads the touchscreen directly and /dev/input/*
+# is root:input -- logind hands the compositor its devices over D-Bus rather
+# than through file permissions, so as the user this process sees no input
+# devices at all. Same reason trackpad-injector and two-finger-rightclick are
+# system units.
 #
-# After= is ordering only -- it does not stop anything from starting this unit.
-# ConditionEnvironment is what keeps it out of sessions with no compositor (e.g.
-# over SSH), where it would otherwise hold the unit name and stop the real one
-# starting at graphical login, since Wants= will not restart what already runs.
-After=graphical-session.target
-PartOf=graphical-session.target
-ConditionEnvironment=HYPRLAND_INSTANCE_SIGNATURE
+# That rules out the graphical-session.target ordering a user unit would use:
+# the system manager has no such target and never sees HYPRLAND_INSTANCE_SIGNATURE,
+# so a ConditionEnvironment on it would keep the unit from ever starting. The
+# script instead tolerates the compositor not being up yet -- it locates the
+# Hyprland instance on disk each time it needs it, and simply does nothing
+# until one exists.
+After=multi-user.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 %h/.local/bin/screensaver-touch-helper.py
+Environment=USER_XDG_RUNTIME_DIR=/run/user/__USER_UID__
+Environment=TARGET_UID=__USER_UID__
+ExecStart=/usr/bin/python3 __USER_HOME__/.local/bin/screensaver-touch-helper.py
 Restart=always
 RestartSec=1
 
 [Install]
-WantedBy=graphical-session.target
+WantedBy=multi-user.target
