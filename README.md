@@ -43,7 +43,7 @@ Pro 7 should need the exact same setup.
 Most device-specific values are now detected at runtime rather than
 hardcoded: `auto-rotate` reads the panel's output/mode/position/scale from
 `hyprctl monitors -j`, the touchscreen is located by capability
-(`ABS_MT_SLOT`) rather than by device name, and the Type Cover sleep hook
+(`INPUT_PROP_DIRECT`) rather than by device name, and the Type Cover sleep hook
 matches the Microsoft vendor id rather than one model's product id. Each is
 still overridable -- see the component READMEs. What remains genuinely
 model-dependent:

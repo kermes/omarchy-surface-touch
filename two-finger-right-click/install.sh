@@ -17,4 +17,5 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now two-finger-rightclick.service
 info "two-finger-rightclick.service is running. Tap two fingers on the touchscreen to right-click."
 info "Customize via env vars in 'sudo systemctl edit two-finger-rightclick.service':"
-info "  TOUCH_DEVICE_NAME, TAP_MAX_DURATION_MS, SECOND_FINGER_WINDOW_MS, MOVE_FUZZ_PERCENT"
+info "  TOUCH_DEVICE_NAME (autodetected; only needed to disambiguate), TAP_MAX_DURATION_MS,"
+info "  SECOND_FINGER_WINDOW_MS, MOVE_FUZZ_PERCENT"
