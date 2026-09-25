@@ -65,7 +65,12 @@ enablement.
 
 ## Changing or removing your PIN
 
-Delete `/etc/omarchy-lock-pin.pwd` and re-run `./install.sh` to set a new
-one. Delete it and don't re-run anything to remove the PIN entirely (the
+Run `omarchy-lock-pin-set`. It prompts for the new PIN and writes it with
+the right ownership and mode; nothing else is touched.
+
+That is deliberately not "re-run `./install.sh`": doing so requires still
+having this source tree, re-copies the plugin QML over anything you have
+customised in `~/.config/omarchy/plugins/touchlock/`, and repeats the
+dependency checks and PAM install for what is only a credential change. Delete it and don't re-run anything to remove the PIN entirely (the
 PAM stack falls through to your real password when the file is absent
 -- `pam_pwdfile` fails open to `default=ignore`, not a hard error).

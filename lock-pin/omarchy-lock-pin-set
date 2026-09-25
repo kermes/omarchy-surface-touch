@@ -1,0 +1,44 @@
+#!/bin/bash
+# Set or change the lock screen PIN.
+#
+# Separate from install.sh so that changing a PIN does not mean re-running the
+# installer: that requires still having the source tree, re-copies the plugin
+# QML over anything you have customised in ~/.config/omarchy/plugins/touchlock,
+# and re-runs the dependency checks and PAM install for what is only a
+# credential change.
+#
+# install.sh calls this for the initial PIN, so the file format and permissions
+# have exactly one implementation.
+set -euo pipefail
+
+PIN_FILE=/etc/omarchy-lock-pin.pwd
+
+if [[ $EUID -eq 0 ]]; then
+  echo "ERROR: run this as your normal user, not with sudo -- it calls sudo itself." >&2
+  echo "  The PIN file's username field is taken from the invoking user; under" >&2
+  echo "  sudo it would name root and pam_pwdfile would never match it." >&2
+  exit 1
+fi
+
+command -v openssl >/dev/null || { echo "ERROR: openssl is required." >&2; exit 1; }
+
+read -rsp "New numeric PIN (4+ digits): " pin; echo
+[[ $pin =~ ^[0-9]{4,}$ ]] || { echo "ERROR: PIN must be 4 or more digits." >&2; exit 1; }
+read -rsp "Confirm PIN: " pin2; echo
+[[ $pin == "$pin2" ]] || { echo "ERROR: PINs do not match." >&2; exit 1; }
+
+# Read the PIN on stdin rather than passing it as an argument: a process's
+# command line is readable by every user on the machine through
+# /proc/<pid>/cmdline for as long as it runs.
+hash=$(printf '%s' "$pin" | openssl passwd -6 -stdin)
+unset pin pin2
+
+printf '%s:%s\n' "$USER" "$hash" | sudo tee "$PIN_FILE" >/dev/null
+# Readable by the invoking user's primary group: Quickshell runs the lock
+# screen's PAM conversation as the logged-in user, so pam_pwdfile opens this
+# file unprivileged.
+sudo chown "root:$(id -gn)" "$PIN_FILE"
+sudo chmod 640 "$PIN_FILE"
+
+echo "PIN updated in $PIN_FILE"
+echo "Your account password still unlocks the session if you forget it."

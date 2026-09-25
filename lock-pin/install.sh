@@ -30,26 +30,19 @@ PIN_FILE=/etc/omarchy-lock-pin.pwd
 PLUGIN_DIR="$HOME/.config/omarchy/plugins/touchlock"
 
 if [[ -e $PIN_FILE ]]; then
-  warn "$PIN_FILE already exists -- leaving it alone. Delete it first to set a new PIN."
+  info "$PIN_FILE already exists -- leaving it alone."
+  info "Change it later with: omarchy-lock-pin-set"
 else
-  echo -n "Choose a numeric PIN (not your account password): "
-  read -rs pin
-  echo
-  [[ $pin =~ ^[0-9]{4,}$ ]] || die "PIN must be 4+ digits."
-  # Read the PIN on stdin rather than passing it as an argument: a process's
-  # command line is readable by every user on the machine through
-  # /proc/<pid>/cmdline for as long as it runs, so `openssl passwd -6 "$pin"`
-  # publishes the PIN for the duration of the hash.
-  hash=$(printf '%s' "$pin" | openssl passwd -6 -stdin)
-  unset pin
-  printf '%s:%s\n' "$USER" "$hash" | sudo tee "$PIN_FILE" >/dev/null
-  sudo chmod 600 "$PIN_FILE"
-  sudo chown root:root "$PIN_FILE"
-  info "Wrote $PIN_FILE"
+  # Delegated so the file format, hashing and permissions have exactly one
+  # implementation, and so changing a PIN later does not require re-running
+  # this installer.
+  bash ./omarchy-lock-pin-set
 fi
 
 sudo cp omarchy-lock-password.pam /etc/pam.d/omarchy-lock-password
 info "Installed /etc/pam.d/omarchy-lock-password"
+
+install_bin omarchy-lock-pin-set
 
 mkdir -p "$PLUGIN_DIR"
 cp plugin/*.qml plugin/manifest.json "$PLUGIN_DIR/"
