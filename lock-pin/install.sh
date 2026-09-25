@@ -36,7 +36,11 @@ else
   read -rs pin
   echo
   [[ $pin =~ ^[0-9]{4,}$ ]] || die "PIN must be 4+ digits."
-  hash=$(openssl passwd -6 "$pin")
+  # Read the PIN on stdin rather than passing it as an argument: a process's
+  # command line is readable by every user on the machine through
+  # /proc/<pid>/cmdline for as long as it runs, so `openssl passwd -6 "$pin"`
+  # publishes the PIN for the duration of the hash.
+  hash=$(printf '%s' "$pin" | openssl passwd -6 -stdin)
   unset pin
   printf '%s:%s\n' "$USER" "$hash" | sudo tee "$PIN_FILE" >/dev/null
   sudo chmod 600 "$PIN_FILE"
