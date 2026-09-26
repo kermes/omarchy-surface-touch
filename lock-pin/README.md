@@ -52,7 +52,7 @@ load, but the touch-specific work is entirely in `VirtualKeyboard.qml` /
 ```
 
 Needs `libpam_pwdfile` (`yay -S libpam_pwdfile`), `openssl` and `setfacl`
-(`pacman -S acl`). Prompts for a PIN (6+ digits), hashes it with
+(`pacman -S acl`). Prompts for a PIN (4+ digits), hashes it with
 `openssl passwd -6` at 200,000 rounds, and writes
 `/etc/omarchy-lock-pin.pwd` as `username:hash`, mode 600 owned by
 `root:root` with a POSIX ACL granting read to your user alone. Then
@@ -74,10 +74,26 @@ that attack expensive, but a short numeric PIN is still a small search space:
 | 5000 (openssl default) | 5.7 ms | 27 s | 95 min |
 | 200,000 (used here) | 181 ms | 30 min | 50 h |
 
-Measured on one CPU core; a GPU is orders of magnitude faster. Hence the
-6-digit minimum. **Do not reuse a PIN you use for anything else** — it
-protects a lock screen, not your account, and it is not stored with the same
-protections as your account password.
+Measured on one CPU core; a GPU is orders of magnitude faster. Each extra
+digit multiplies the work by ten, so the table is there to let you choose
+rather than to push you somewhere: **the minimum is 4 digits**, the same as
+Windows Hello allows, and 6 costs an attacker a hundred times more.
+
+Two things bound how much this matters. `pam_faillock` allows 10 attempts per
+120 seconds, so guessing *at the lock screen* takes roughly 33 hours to
+exhaust a 4-digit space regardless of rounds. And the offline attack needs
+code execution as your user to read the hash in the first place, plus physical
+access to the locked device to use what it recovers.
+
+Worth knowing where this differs from Windows Hello, which allows the same 4
+digits: Hello keeps the PIN in the TPM with rate limiting in hardware, so
+there is no hash to steal and no offline attack at all. Here the hash is
+readable by your own user by design, because `pam_pwdfile` runs unprivileged.
+Rounds are what stands in for the TPM, and they are a weaker substitute.
+
+**Do not reuse a PIN you use for anything else** — it protects a lock screen,
+not your account, and it is not stored with the same protections as your
+account password.
 
 You still need to **enable the plugin** through however your Omarchy version
 surfaces plugin management (Setup > Plugins, or directly editing
