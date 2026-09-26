@@ -67,6 +67,17 @@ else
   info "Wrote $PIN_FILE"
 fi
 
+# The ACL above exists so pam_pwdfile, which runs as your user, can read this
+# file; when it cannot, the only symptom is a correct PIN being rejected at the
+# lock screen. Read it back once so that surfaces here instead. This also
+# catches a file left by an older version of this script, which the
+# "already exists" branch deliberately does not touch.
+if [[ ! -r $PIN_FILE ]]; then
+  warn "$PIN_FILE exists but is not readable by $(id -un)."
+  warn "pam_pwdfile runs as your user, so the PIN would be silently rejected."
+  die "Delete it and re-run to rewrite it correctly: sudo rm $PIN_FILE"
+fi
+
 sudo cp omarchy-lock-password.pam /etc/pam.d/omarchy-lock-password
 info "Installed /etc/pam.d/omarchy-lock-password"
 

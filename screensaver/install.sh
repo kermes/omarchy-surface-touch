@@ -30,7 +30,11 @@ fi
 install_system_unit screensaver-touch-helper.service
 
 sudo systemctl daemon-reload
-sudo systemctl enable --now screensaver-touch-helper.service
+# `enable --now` starts the unit only if it is not already running, so on an
+# upgrade it reports success while leaving the previous process and the old
+# script loaded. Enable, then restart explicitly.
+sudo systemctl enable screensaver-touch-helper.service
+sudo systemctl restart screensaver-touch-helper.service
 
 info "screensaver-touch-helper.service is running (system unit, runs as root)."
 info "Override the touch device name with: sudo systemctl edit screensaver-touch-helper.service"

@@ -66,8 +66,12 @@ knowing before committing to a linux-surface install, which is a much bigger
 change than the rest of this repo. Skip `kernel/` on those models and start
 at [Quick start](#quick-start).
 
-*(Reported on a Surface Go; not verified here. See
-[#5](https://github.com/javon27/omarchy-surface-touch/issues/5).)*
+Touch, panel geometry and Type Cover detection are all confirmed working on
+a Surface Go (ELAN9038 digitizer, `09B5` Type Cover) -- see
+[#5](https://github.com/javon27/omarchy-surface-touch/issues/5), verified by
+@kermes on that hardware. The one part still unconfirmed there is whether
+[`touchpad-mt-fix/`](touchpad-mt-fix/) is needed at all on ELAN models; see
+its README.
 
 ## Surface Pen
 
@@ -116,6 +120,26 @@ cd omarchy-surface-touch
 Start with [`kernel/README.md`](kernel/README.md) first if you haven't
 already got linux-surface + iptsd installed and your touchscreen working --
 everything else assumes that's done.
+
+### Dependencies
+
+Each component's `install.sh` checks its own and tells you what's missing, so
+you can also just run it and see. Installing everything up front:
+
+```bash
+sudo pacman -S python python-evdev iio-sensor-proxy jq openssl acl make gcc
+yay -S libpam_pwdfile          # lock-pin only, AUR
+```
+
+| Component | Needs |
+|---|---|
+| [`wvkbd/`](wvkbd/), [`osk/`](osk/) | `make`, `gcc` (plus wvkbd-deskintl's own makedepends) |
+| [`trackpad/`](trackpad/) | `python`, `python-evdev`, `quickshell` (Omarchy ships this) |
+| [`two-finger-right-click/`](two-finger-right-click/) | `python`, `python-evdev` |
+| [`screensaver/`](screensaver/) | `python`, `python-evdev`, plus `trackpad/` installed |
+| [`auto-rotate/`](auto-rotate/) | `iio-sensor-proxy`, `jq`, `hyprland` |
+| [`lock-pin/`](lock-pin/) | `openssl`, `acl`, `libpam_pwdfile` (AUR) |
+| [`touchpad-mt-fix/`](touchpad-mt-fix/) | none |
 
 ## Why some of this needs root
 

@@ -85,6 +85,25 @@ surfaces plugin management (Setup > Plugins, or directly editing
 the plugin's files but doesn't assume how your Omarchy version wires plugin
 enablement.
 
+## If a correct PIN is rejected
+
+Two independent bugs used to produce this exact symptom, and fixing either
+one alone still leaves it, so check both:
+
+1. **The PIN file was unreadable** by the user running the PAM conversation,
+   so `pam_pwdfile` was never consulted and auth fell through to `pam_unix`.
+   `journalctl` shows `couldn't open password file` rather than
+   `wrong password for user`. `install.sh` now reads the file back and fails
+   loudly instead, but a file written by an older version is left untouched --
+   delete it and re-run.
+2. **The keypad's Enter key was off-screen** below the bottom edge on short
+   displays (under roughly 731px logical height), so the PIN was entered but
+   never submitted. Nothing is logged at all in that case, because nothing
+   was ever sent.
+
+Both are fixed; the distinction matters when debugging a fresh install on
+unfamiliar hardware. The `journalctl` line tells you which one you have.
+
 ## Changing or removing your PIN
 
 Delete `/etc/omarchy-lock-pin.pwd` and re-run `./install.sh` to set a new
