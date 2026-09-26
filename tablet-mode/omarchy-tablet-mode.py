@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run an on-screen keyboard only while the physical keyboard is unusable.
+"""Publish Surface tablet-mode state, and run hooks when it changes.
 
 Two distinct conditions, and device presence alone only sees one of them:
 
@@ -21,8 +21,13 @@ A missing switch therefore means "no cover", not "not in tablet mode" -- which
 the predicate below already handles, since it asks whether a usable keyboard is
 present rather than trusting the switch alone.
 
-Runs as root from a system unit so it can read /dev/input directly, and starts
-the keyboard as the session user with setpriv.
+This publishes hardware state rather than acting on it: /run/omarchy-tablet-mode
+holds the current values and every executable in /etc/omarchy-tablet-mode.d/ is
+run on each transition with them in the environment. An on-screen keyboard is
+the first consumer, shipped as a hook; rotation lock and the lock screen
+plausibly want the same signal.
+
+Runs as root from a system unit so it can read /dev/input directly.
 """
 
 import glob
@@ -38,7 +43,6 @@ from ctypes import CDLL, c_int, c_char_p, c_uint32, get_errno
 import evdev
 from evdev import ecodes as e
 
-OSK_COMMAND = os.environ.get("OSK_COMMAND", "wvkbd-deskintl --hidden -l full,special")
 TARGET_UID = int(os.environ.get("TARGET_UID", "1000"))
 # Not TARGET_UID: a primary group is not reliably the same id as the user
 # (useradd -g users gives the shared users group).
@@ -55,6 +59,8 @@ RUNTIME_DIR = os.environ.get("USER_XDG_RUNTIME_DIR", f"/run/user/{TARGET_UID}")
 HOTPLUG_BUSES = (0x03, 0x05)  # BUS_USB, BUS_BLUETOOTH
 ALPHA_KEYS = {e.KEY_A, e.KEY_Q, e.KEY_Z}
 
+STATE_FILE = os.environ.get("TABLET_MODE_STATE_FILE", "/run/omarchy-tablet-mode")
+HOOK_DIR = os.environ.get("TABLET_MODE_HOOK_DIR", "/etc/omarchy-tablet-mode.d")
 
 def log(*a):
     print(*a, flush=True)
@@ -96,78 +102,63 @@ def keyboard_attached():
     return False
 
 
-def session_env():
-    """Enough of the user's session for a Wayland client to start.
+def publish(state):
+    """Write the state where anything else can read it, atomically."""
+    body = "".join(f"{k}={v}\n" for k, v in state.items())
+    tmp = f"{STATE_FILE}.tmp"
+    with open(tmp, "w") as fh:
+        fh.write(body)
+    os.replace(tmp, STATE_FILE)
+    os.chmod(STATE_FILE, 0o644)
 
-    Discovered rather than inherited: this runs as root from a system unit, so
-    none of it is in the environment.
+
+def run_hooks(state):
+    """Run every executable in HOOK_DIR with the state in the environment.
+
+    Hooks are how anything else reacts to tablet mode: the on-screen keyboard
+    is simply the first one. A hook that fails is logged and does not stop the
+    others.
     """
-    sockets = sorted(glob.glob(f"{RUNTIME_DIR}/wayland-*"))
-    sockets = [s for s in sockets if not s.endswith(".lock")]
-    if not sockets:
-        return None
-    home = os.environ.get("USER_HOME")
-    if not home:
-        try:
-            home = pwd.getpwuid(TARGET_UID).pw_dir
-        except KeyError:
-            home = "/"
-    return {
-        "XDG_RUNTIME_DIR": RUNTIME_DIR,
-        "WAYLAND_DISPLAY": os.path.basename(sockets[0]),
-        "DBUS_SESSION_BUS_ADDRESS": f"unix:path={RUNTIME_DIR}/bus",
-        "HOME": home,
-        # The patched wvkbd from osk/ installs to ~/.local/bin, which is not on
-        # root's PATH and is not inherited here.
-        "PATH": f"{home}/.local/bin:/usr/local/bin:/usr/bin:/bin",
-    }
-
-
-def osk_binary():
-    return shlex.split(OSK_COMMAND)[0].rsplit("/", 1)[-1]
-
-
-def osk_running():
-    """True only for a live process. `pgrep` alone also matches zombies."""
-    r = subprocess.run(["pgrep", "-u", str(TARGET_UID), "-x", osk_binary()],
-                       capture_output=True, text=True)
-    for pid in r.stdout.split():
-        try:
-            with open(f"/proc/{pid}/stat") as fh:
-                if fh.read().rsplit(") ", 1)[1].split()[0] != "Z":
-                    return True
-        except OSError:
-            continue
-    return False
-
-
-def start_osk():
-    env = session_env()
-    if env is None:
-        log("no wayland session yet; will retry on the next event")
+    try:
+        names = sorted(os.listdir(HOOK_DIR))
+    except FileNotFoundError:
         return
-    subprocess.Popen(
-        ["setpriv", "--reuid", str(TARGET_UID), "--regid", str(TARGET_GID),
-         "--init-groups", "--", "env", *[f"{k}={v}" for k, v in env.items()],
-         *shlex.split(OSK_COMMAND)],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True,
-    )
+    env = {**os.environ, **{k: str(v) for k, v in state.items()},
+           "TARGET_UID": str(TARGET_UID), "TARGET_GID": str(TARGET_GID),
+           "USER_XDG_RUNTIME_DIR": RUNTIME_DIR}
+    for name in names:
+        path = os.path.join(HOOK_DIR, name)
+        if not os.access(path, os.X_OK) or os.path.isdir(path):
+            continue
+        try:
+            r = subprocess.run([path], env=env, capture_output=True, text=True, timeout=15)
+            if r.returncode != 0:
+                log(f"hook {name} exited {r.returncode}: {r.stderr.strip()[:200]}")
+        except Exception as exc:
+            log(f"hook {name} failed: {exc}")
 
 
-def stop_osk():
-    subprocess.run(["pkill", "-u", str(TARGET_UID), "-x", osk_binary()])
+_last = None
 
 
 def apply(switch):
+    """Publish state, and run hooks only when it actually changes."""
+    global _last
     tablet = read_tablet_mode(switch) if switch else False
     kbd = keyboard_attached()
-    want = tablet or not kbd
-    if want and not osk_running():
-        log(f"keyboard unusable (tablet={tablet}, keyboard_attached={kbd}) -- starting {osk_binary()}")
-        start_osk()
-    elif not want and osk_running():
-        log(f"keyboard usable again (tablet={tablet}, keyboard_attached={kbd}) -- stopping {osk_binary()}")
-        stop_osk()
+    state = {
+        "TABLET_MODE": int(tablet),
+        "KEYBOARD_ATTACHED": int(kbd),
+        # The question consumers usually want answered, derived once here so
+        # every hook agrees: a missing switch means "no cover", not "not folded".
+        "KEYBOARD_USABLE": int(kbd and not tablet),
+    }
+    publish(state)
+    if state != _last:
+        log(f"tablet={state['TABLET_MODE']} keyboard_attached={state['KEYBOARD_ATTACHED']} "
+            f"keyboard_usable={state['KEYBOARD_USABLE']}")
+        _last = state
+        run_hooks(state)
 
 
 def inotify_devinput():

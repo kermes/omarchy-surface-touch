@@ -33,11 +33,21 @@ fi
 install_bin omarchy-tablet-mode.py
 install_system_unit omarchy-tablet-mode.service
 
+# Hooks are how anything else consumes tablet mode. The on-screen keyboard is
+# shipped as the first one; drop your own scripts alongside it.
+sudo install -d -m 755 /etc/omarchy-tablet-mode.d
+for hook in hooks/*; do
+  sudo install -m 755 "$hook" "/etc/omarchy-tablet-mode.d/$(basename "$hook")"
+  info "Installed /etc/omarchy-tablet-mode.d/$(basename "$hook")"
+done
+
 sudo systemctl daemon-reload
 sudo systemctl enable omarchy-tablet-mode.service
 sudo systemctl restart omarchy-tablet-mode.service
 
 info "omarchy-tablet-mode.service is running."
-info "Change the keyboard it runs with: sudo systemctl edit omarchy-tablet-mode.service"
+info "State is published to /run/omarchy-tablet-mode and hooks run from"
+info "  /etc/omarchy-tablet-mode.d/ on every transition."
+info "Change the keyboard: sudo systemctl edit omarchy-tablet-mode.service"
 info "  [Service]"
-info "  Environment=OSK_COMMAND=squeekboard"
+info "  Environment=\"OSK_COMMAND=squeekboard\""

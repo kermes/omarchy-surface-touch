@@ -1,23 +1,19 @@
 [Unit]
-Description=Show an on-screen keyboard while the physical keyboard is unusable
+Description=Publish Surface tablet-mode state and run transition hooks
 # Deliberately not ordered against the graphical session: this reads /dev/input
-# as root and must survive the compositor restarting. It discovers the Wayland
-# socket at the moment it needs it, and does nothing until one exists.
+# as root and must survive the compositor restarting. Hooks that need a session
+# discover it when they run, and do nothing until one exists.
 After=multi-user.target
 
 [Service]
 Type=simple
 Environment=TARGET_UID=__USER_UID__
 Environment=USER_XDG_RUNTIME_DIR=/run/user/__USER_UID__
-Environment=USER_HOME=__USER_HOME__
-# The on-screen keyboard to run. Anything that stays in the foreground works;
-# squeekboard is a common alternative, since it also auto-shows on text-field
-# focus. See the README.
-# Quoted: systemd splits Environment= on whitespace, so an unquoted value with
-# arguments is parsed as several assignments and the arguments are dropped.
-Environment="OSK_COMMAND=wvkbd-deskintl --hidden -l full,special --landscape-layers full,special"
+# Passed through to hooks. Quoted: Environment= splits on whitespace, so an
+# unquoted command with arguments is parsed as several assignments and the
+# arguments are silently dropped.
+Environment="OSK_COMMAND=wvkbd-deskintl -l full,special --landscape-layers full,special"
 ExecStart=/usr/bin/python3 __USER_HOME__/.local/bin/omarchy-tablet-mode.py
-ExecStopPost=-/usr/bin/pkill -u __USER_UID__ -x wvkbd-deskintl
 Restart=always
 RestartSec=2
 

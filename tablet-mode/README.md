@@ -1,7 +1,9 @@
 # Tablet mode
 
-Runs an on-screen keyboard only while the physical keyboard is unusable, and
-stops it again when it is not.
+Publishes whether the physical keyboard is usable, and runs hooks when that
+changes. An on-screen keyboard is shipped as the first hook; it is hardware
+state rather than keyboard behaviour, so rotation lock, the lock screen or
+anything else can consume the same signal.
 
 Not installed by `--all`: it changes behaviour for anyone who relies on the
 keyboard being available to toggle at any time.
@@ -60,6 +62,34 @@ against the graphical session so it survives the compositor restarting; it
 discovers the Wayland socket when it needs one and does nothing until one
 exists.
 
+## What it publishes
+
+`/run/omarchy-tablet-mode`, rewritten atomically on every change:
+
+```
+TABLET_MODE=0
+KEYBOARD_ATTACHED=1
+KEYBOARD_USABLE=1
+```
+
+`KEYBOARD_USABLE` is the derived answer most consumers want, computed once so
+every hook agrees.
+
+## Hooks
+
+Every executable in `/etc/omarchy-tablet-mode.d/` runs on each transition, with
+those three values plus `TARGET_UID`, `TARGET_GID` and `USER_XDG_RUNTIME_DIR`
+in the environment. A hook that fails is logged and does not stop the others.
+
+```bash
+#!/bin/bash
+# /etc/omarchy-tablet-mode.d/60-rotation-lock
+[[ ${TABLET_MODE:-0} -eq 1 ]] && unlock-rotation || lock-rotation
+```
+
+Hooks run as **root**. Anything that has to be the user's own Wayland client
+needs `setpriv`; `50-onscreen-keyboard` shows the pattern.
+
 ## Choosing the keyboard
 
 ```bash
@@ -69,12 +99,19 @@ sudo systemctl edit omarchy-tablet-mode.service
 ```ini
 [Service]
 Environment="OSK_COMMAND=squeekboard"
-ExecStopPost=
-ExecStopPost=-/usr/bin/pkill -u <your uid> -x squeekboard
 ```
 
-The default is the patched `wvkbd-deskintl` from [`../osk/`](../osk/). Anything
-that stays in the foreground works.
+The default is the patched `wvkbd-deskintl` from [`../osk/`](../osk/), started
+**without** `--hidden`. That matters: wvkbd implements `virtual-keyboard-v1`
+only, so it sends keystrokes and has no way to hear that a text field took
+focus. Started hidden it would need `SUPER+SHIFT+K` to reveal, which is a
+keypress you cannot make on a machine whose keyboard just became unusable.
+
+`squeekboard` is the opposite: it implements `text-input-v3`, starts hidden by
+design and shows itself when a text field takes focus. Folding the cover while
+looking at a window with no text field therefore shows nothing until you tap
+one. Both behaviours are correct for their keyboard; neither pops up merely
+because the cover moved.
 
 > Quote the value. `Environment=` splits on whitespace, so an unquoted command
 > with arguments is parsed as several assignments and the arguments are silently
@@ -96,10 +133,12 @@ journalctl -u omarchy-tablet-mode.service -f
 Then fold the cover, unfold it, and detach it. Expect one line per transition:
 
 ```
-keyboard unusable (tablet=True,  keyboard_attached=True)  -- starting squeekboard
-keyboard usable again (tablet=False, keyboard_attached=True) -- stopping squeekboard
-keyboard unusable (tablet=False, keyboard_attached=False) -- starting squeekboard
+tablet=1 keyboard_attached=1 keyboard_usable=0     <- folded back
+tablet=0 keyboard_attached=1 keyboard_usable=1     <- unfolded
+tablet=0 keyboard_attached=0 keyboard_usable=0     <- detached
 ```
+
+`cat /run/omarchy-tablet-mode` at any point shows the same values.
 
 The third line is a detach on a Surface Go: the chassis switch still reads
 `False` while the keyboard is gone, which is why the predicate checks both.
