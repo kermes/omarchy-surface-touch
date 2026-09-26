@@ -20,6 +20,7 @@ Item {
   readonly property string placeholderText: "Enter Password"
   readonly property int fieldWidth: 381
   readonly property int fieldHeight: 67
+  readonly property int keyboardGap: 28
   readonly property int outlineThickness: 3
   readonly property int fieldFontSize: Math.round(Style.font.heading * 1.125)
   readonly property int passwordDotFontSize: Math.round(Style.font.heading * 1.33)
@@ -123,7 +124,20 @@ Item {
       id: inputField
       width: root.fieldWidth
       height: root.fieldHeight
-      anchors.centerIn: parent
+      anchors.horizontalCenter: parent.horizontalCenter
+      anchors.verticalCenter: parent.verticalCenter
+      // Centre the field and the on-screen keyboard as a group, rather than
+      // centring the field alone. With the field at the screen's midpoint the
+      // keyboard below it overflows the bottom edge on short screens: the
+      // numeric layout is 3*56 + 2*10 + 10+48 + 10+48 = 304px, so on a 600px
+      // tall screen it ends around y=665 and the Enter key -- the last element
+      // in the column -- cannot be tapped.
+      //
+      // This centres the group; it does not guarantee a fit. The group fits iff
+      // keyboardHeight + fieldHeight + keyboardGap <= screen height, so from
+      // roughly 399px upward. It shifts the field on every screen size, not
+      // only short ones.
+      anchors.verticalCenterOffset: -Math.round((touchKeyboard.implicitHeight + root.keyboardGap) / 2)
       color: Color.lock.background
       borderSpec: root.inputBorderSpec
       radius: Style.cornerRadius
@@ -219,11 +233,17 @@ Item {
     // a physical keyboard attached (e.g. Type Cover detached). Types directly
     // into passwordInput via insert()/remove(), same as a real keyboard would.
     VirtualKeyboard {
+      id: touchKeyboard
       anchors.top: inputField.bottom
-      anchors.topMargin: 28
+      anchors.topMargin: root.keyboardGap
       anchors.horizontalCenter: parent.horizontalCenter
       width: 480
-      visible: root.inputEnabled && !root.authenticatingPassword
+      // Fade rather than hide: `visible: false` collapses the height the offset
+      // above derives from, so the field would slide down ~166px while
+      // "Checking..." shows and back up on a rejected PIN. `enabled: false`
+      // keeps the faded keyboard inert to touch.
+      opacity: root.inputEnabled && !root.authenticatingPassword ? 1 : 0
+      enabled: root.inputEnabled && !root.authenticatingPassword
       target: passwordInput
     }
   }
