@@ -33,10 +33,15 @@ PLUGIN_DIR="$HOME/.config/omarchy/plugins/touchlock"
 if [[ -e $PIN_FILE ]]; then
   warn "$PIN_FILE already exists -- leaving it alone. Delete it first to set a new PIN."
 else
-  echo -n "Choose a numeric PIN (not your account password): "
+  echo -n "Choose a numeric PIN, 4+ digits (not your account password): "
   read -rs pin
   echo
-  [[ $pin =~ ^[0-9]{6,}$ ]] || die "PIN must be 6+ digits."
+  # 4 is the floor, not the recommendation -- see README.md for what each extra
+  # digit buys against offline cracking. Matching what Windows Hello allows:
+  # the online path is rate-limited by pam_faillock either way, and forcing a
+  # longer PIN on a touch keypad trades real usability for a threat that needs
+  # code execution as you AND physical access to the locked device.
+  [[ $pin =~ ^[0-9]{4,}$ ]] || die "PIN must be 4+ digits."
   # Read the PIN on stdin rather than passing it as an argument: a process's
   # command line is readable by every user on the machine through
   # /proc/<pid>/cmdline for as long as it runs, so `openssl passwd -6 "$pin"`
