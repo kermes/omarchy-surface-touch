@@ -14,7 +14,11 @@ install_bin two-finger-right-click.py
 install_system_unit two-finger-rightclick.service
 
 sudo systemctl daemon-reload
-sudo systemctl enable --now two-finger-rightclick.service
+# `enable --now` starts the unit only if it is not already running, so on an
+# upgrade it reports success while leaving the previous process and the old
+# script loaded. Enable, then restart explicitly.
+sudo systemctl enable two-finger-rightclick.service
+sudo systemctl restart two-finger-rightclick.service
 info "two-finger-rightclick.service is running. Tap two fingers on the touchscreen to right-click."
 info "Customize via env vars in 'sudo systemctl edit two-finger-rightclick.service':"
 info "  TOUCH_DEVICE_NAME (autodetected; only needed to disambiguate), TAP_MAX_DURATION_MS,"

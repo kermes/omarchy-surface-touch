@@ -11,6 +11,20 @@ finger at all. The touchpad's `hid-multitouch` driver has (for reasons not
 fully understood) come back up in a degraded single-touch mode after
 resume.
 
+## Which Type Covers this affects
+
+Seen on the `09C0` Type Cover (Surface Pro 7+). On a Surface Go's `09B5`
+cover the dropout does not appear to happen: with this hook removed entirely,
+a suspend/resume cycle left two-finger scroll working, nothing logged to
+`journalctl -t rebind-surface-touchpad`, and the sysfs instance suffix
+unchanged. So the degradation may be specific to `09C0` rather than to
+Surface Type Covers generally.
+
+The hook matches the Microsoft vendor id, so it installs and matches on both.
+Installing it where it isn't needed costs nothing -- it only rebinds on
+resume, and rebinding a healthy device is harmless. Reported in
+[#5](https://github.com/javon27/omarchy-surface-touch/issues/5).
+
 ## Fix
 
 Force the driver to re-negotiate by unbinding and rebinding the Type

@@ -19,7 +19,11 @@ cp shell.qml "$HOME/.config/omarchy/trackpad/shell.qml"
 install_bin omarchy-toggle-trackpad
 
 sudo systemctl daemon-reload
-sudo systemctl enable --now trackpad-injector.service
+# `enable --now` starts the unit only if it is not already running, so on an
+# upgrade it reports success while leaving the previous process and the old
+# script loaded. Enable, then restart explicitly.
+sudo systemctl enable trackpad-injector.service
+sudo systemctl restart trackpad-injector.service
 
 info "Trackpad panel installed. Toggle it with: omarchy-toggle-trackpad"
 info "Bind a key to it -- see ../hypr/bindings.snippet.lua (SUPER+SHIFT+T by default)."

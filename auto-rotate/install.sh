@@ -16,7 +16,11 @@ install_bin omarchy-toggle-rotation-lock
 install_user_unit auto-rotate.service
 
 systemctl --user daemon-reload
-systemctl --user enable --now auto-rotate.service
+# `enable --now` starts the unit only if it is not already running, so on an
+# upgrade it reports success while leaving the previous process and the old
+# script loaded. Enable, then restart explicitly.
+systemctl --user enable auto-rotate.service
+systemctl --user restart auto-rotate.service
 
 info "auto-rotate.service is running."
 info "Panel geometry is detected at startup; override with ROTATE_MONITOR/ROTATE_MODE/ROTATE_POS/ROTATE_SCALE"
