@@ -23,6 +23,7 @@ fi
 
 require_cmd openssl
 require_cmd pacman
+require_cmd setfacl "Install with: pacman -S acl"
 
 pacman -Qq libpam_pwdfile >/dev/null 2>&1 || die "libpam_pwdfile is required. Install with: yay -S libpam_pwdfile"
 
@@ -35,16 +36,34 @@ else
   echo -n "Choose a numeric PIN (not your account password): "
   read -rs pin
   echo
-  [[ $pin =~ ^[0-9]{4,}$ ]] || die "PIN must be 4+ digits."
+  [[ $pin =~ ^[0-9]{6,}$ ]] || die "PIN must be 6+ digits."
   # Read the PIN on stdin rather than passing it as an argument: a process's
   # command line is readable by every user on the machine through
   # /proc/<pid>/cmdline for as long as it runs, so `openssl passwd -6 "$pin"`
   # publishes the PIN for the duration of the hash.
-  hash=$(printf '%s' "$pin" | openssl passwd -6 -stdin)
+  #
+  # rounds=200000 rather than openssl's 5000-round default: the hash ends up
+  # readable by your own user (see the ACL below), so offline cracking is the
+  # real threat, and at 5000 rounds a short numeric PIN falls in well under a
+  # minute on one core. pam_pwdfile calls crypt_r, so libxcrypt honours the
+  # $6$rounds=N$ form.
+  hash=$(printf '%s' "$pin" | openssl passwd -6 -salt "rounds=200000\$$(openssl rand -hex 8)" -stdin)
   unset pin
-  printf '%s:%s\n' "$USER" "$hash" | sudo tee "$PIN_FILE" >/dev/null
-  sudo chmod 600 "$PIN_FILE"
-  sudo chown root:root "$PIN_FILE"
+  # Create with the final mode in one step: `sudo tee` lands the hash at 0644
+  # under root's umask, and under `set -e` any failure before a later chmod
+  # would leave it world-readable permanently, since the next run sees the
+  # file and skips it.
+  printf '%s:%s\n' "$(id -un)" "$hash" | sudo install -m 600 /dev/stdin "$PIN_FILE"
+  # Quickshell runs the lock screen's PAM conversation as the logged-in user,
+  # so pam_pwdfile opens this file unprivileged. With 600 root:root it fails
+  # with "couldn't open password file" and auth silently falls through to
+  # pam_unix, leaving the PIN apparently rejected. pam_unix is unaffected
+  # because it reads shadow via the setuid unix_chkpwd helper.
+  #
+  # Grant read to exactly one user via an ACL rather than widening the group:
+  # a primary group is not always private (`useradd -g users` makes it the
+  # shared `users` group, which exists on a stock install).
+  sudo setfacl -m "u:$(id -un):r" "$PIN_FILE"
   info "Wrote $PIN_FILE"
 fi
 
